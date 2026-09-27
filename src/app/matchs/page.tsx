@@ -8,6 +8,9 @@ type Team = {
   id: number;
   name: string;
   abbreviation: string;
+  logo_url?: string | null;
+  wins?: number;
+  losses?: number;
 };
 
 type Player = {
@@ -78,8 +81,8 @@ export default function GamesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [savingGameId, setSavingGameId] = useState<number | null>(null);
-  const [savedGameId, setSavedGameId] = useState<number | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
+const [savedAll, setSavedAll] = useState(false);
 
   useEffect(() => {
     const savedPlayer = localStorage.getItem("nba_pronos_player");
@@ -125,7 +128,7 @@ export default function GamesPage() {
     async function loadGames() {
       setLoading(true);
       setError("");
-      setSavedGameId(null);
+      setSavedAll(false);
 
       const { data: dayBounds, error: dayBoundsError } =
         await supabase.rpc("get_nba_day_bounds", {
@@ -178,7 +181,7 @@ export default function GamesPage() {
 
       const { data: teams, error: teamsError } = await supabase
         .from("teams")
-        .select("id, name, abbreviation")
+        .select("id, name, abbreviation, logo_url")
         .in("id", teamIds);
 
       if (teamsError || !teams) {
@@ -188,6 +191,31 @@ export default function GamesPage() {
         setLoading(false);
         return;
       }
+
+      const { data: rankings, error: rankingsError } =
+        await supabase
+          .from("team_rankings")
+          .select("team_id, wins, losses")
+          .eq("season_id", currentSeasonId)
+          .in("team_id", teamIds);
+
+      if (rankingsError) {
+        setError(rankingsError.message);
+        setLoading(false);
+        return;
+      }
+
+      const teamsWithRecords: Team[] = teams.map((team) => {
+        const ranking = rankings?.find(
+          (item) => item.team_id === team.id
+        );
+
+        return {
+          ...team,
+          wins: ranking?.wins ?? 0,
+          losses: ranking?.losses ?? 0,
+        };
+      });
 
       const gameIds = gameData.map((game) => game.id);
 
@@ -199,11 +227,11 @@ export default function GamesPage() {
 
       const completedGames: Game[] = await Promise.all(
         gameData.map(async (game) => {
-          const homeTeam = teams.find(
+          const homeTeam = teamsWithRecords.find(
             (team) => team.id === game.home_team_id
           );
 
-          const awayTeam = teams.find(
+          const awayTeam = teamsWithRecords.find(
             (team) => team.id === game.away_team_id
           );
 
@@ -268,59 +296,78 @@ export default function GamesPage() {
       )
     );
 
-    setSavedGameId(null);
+    setSavedAll(false);
   }
 
-  async function savePrediction(game: Game) {
-    if (!player || !game.selectedTeamId) return;
+  async function saveAllPredictions() {
+  if (!player) return;
 
-    setSavingGameId(game.id);
-    setSavedGameId(null);
-    setError("");
+  const gamesToSave = games.filter((game) => {
+    const isFinished = game.status === "finished";
 
-    const { data: lockTime, error: lockError } = await supabase.rpc(
-      "get_prediction_lock_time",
-      {
-        p_game_id: game.id,
-      }
+    const isLocked =
+      game.lockTime !== null &&
+      game.lockTime !== undefined &&
+      new Date() >= new Date(game.lockTime);
+
+    return (
+      !isFinished &&
+      !isLocked &&
+      game.selectedTeamId
     );
+  });
+
+  if (gamesToSave.length === 0) return;
+
+  setSavingAll(true);
+  setSavedAll(false);
+  setError("");
+
+  for (const game of gamesToSave) {
+    const { data: lockTime, error: lockError } =
+      await supabase.rpc(
+        "get_prediction_lock_time",
+        {
+          p_game_id: game.id,
+        }
+      );
 
     if (lockError) {
       setError(lockError.message);
-      setSavingGameId(null);
+      setSavingAll(false);
       return;
     }
 
     if (new Date() >= new Date(lockTime)) {
-      setError("Les pronostics de ce match sont clôturés.");
-      setSavingGameId(null);
-      return;
+      continue;
     }
 
-    const { error: predictionError } = await supabase
-      .from("predictions")
-      .upsert(
-        {
-          user_id: player.user_id,
-          game_id: game.id,
-          team_id: game.selectedTeamId,
-          locked_odds: null,
-          points: 0,
-        },
-        {
-          onConflict: "user_id,game_id",
-        }
-      );
+    const { error: predictionError } =
+      await supabase
+        .from("predictions")
+        .upsert(
+          {
+            user_id: player.user_id,
+            game_id: game.id,
+            team_id: game.selectedTeamId,
+            locked_odds: null,
+            points: 0,
+          },
+          {
+            onConflict: "user_id,game_id",
+          }
+        );
 
     if (predictionError) {
       setError(predictionError.message);
-      setSavingGameId(null);
+      setSavingAll(false);
       return;
     }
-
-    setSavingGameId(null);
-    setSavedGameId(game.id);
   }
+
+  setSavingAll(false);
+  setSavedAll(true);
+}
 
   function changeDate(days: number) {
     const current = new Date(`${date}T12:00:00`);
@@ -350,20 +397,20 @@ export default function GamesPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 text-white">
-      <div className="mx-auto min-h-screen max-w-md bg-slate-900">
+    <main className="min-h-screen bg-[#0B1F1D] text-white">
+      <div className="mx-auto min-h-screen max-w-md bg-[#0B1F1D]">
         <header className="px-5 pb-4 pt-8">
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-[#A9C2BD]">
             {player?.username || "..."}
           </p>
 
-          <h1 className="mt-1 text-3xl font-black">
+          <h1 className="mt-1 text-3xl font-black text-[#F8F6EF]">
             Matchs 🏀
           </h1>
         </header>
 
         <section className="px-5 pb-28">
-          <div className="mb-5 flex items-center justify-between rounded-2xl bg-slate-800 p-2">
+          <div className="mb-5 flex items-center justify-between rounded-2xl bg-[#265550] p-2 text-[#F8F6EF]">
             <button
               type="button"
               onClick={() => changeDate(-1)}
@@ -377,7 +424,7 @@ export default function GamesPage() {
                 {formatDay()}
               </p>
 
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text- [#A9C2BD0">
                 {games.length} match{games.length > 1 ? "s" : ""}
               </p>
             </div>
@@ -417,312 +464,267 @@ export default function GamesPage() {
 
           <div className="space-y-3">
   {games.map((game) => {
-    const awaySelected =
-      game.selectedTeamId === game.away_team_id;
+  const awaySelected =
+    game.selectedTeamId === game.away_team_id;
 
-    const homeSelected =
-      game.selectedTeamId === game.home_team_id;
+  const homeSelected =
+    game.selectedTeamId === game.home_team_id;
 
-    const isFinished = game.status === "finished";
+  const isFinished = game.status === "finished";
 
-    const isLocked =
-      game.lockTime !== null &&
-      game.lockTime !== undefined &&
-      new Date() >= new Date(game.lockTime);
+  const isLocked =
+    game.lockTime !== null &&
+    game.lockTime !== undefined &&
+    new Date() >= new Date(game.lockTime);
 
-    const winnerTeamId =
-      isFinished &&
-      game.home_score !== null &&
-      game.away_score !== null
-        ? game.home_score > game.away_score
-          ? game.home_team_id
-          : game.away_team_id
-        : null;
+  const winnerTeamId =
+    isFinished &&
+    game.home_score !== null &&
+    game.away_score !== null
+      ? game.home_score > game.away_score
+        ? game.home_team_id
+        : game.away_team_id
+      : null;
 
-    const predictionCorrect =
-      game.selectedTeamId !== null &&
-      game.selectedTeamId !== undefined &&
-      game.selectedTeamId === winnerTeamId;
+  const predictionCorrect =
+    game.selectedTeamId !== null &&
+    game.selectedTeamId !== undefined &&
+    game.selectedTeamId === winnerTeamId;
 
-    const selectedTeam =
-      awaySelected
-        ? game.awayTeam
-        : homeSelected
-          ? game.homeTeam
-          : null;
+  return (
+    <div
+      key={game.id}
+      className="rounded-2xl bg-[#265550] px-3 py-3 text-[#8F6EF]"
+    >
+      {/* HEURE / STATUT */}
+      <p className="mb-2 text-center text-xs font-semibold text-[#B9CBC7]">
 
-    return (
-      <div
-        key={game.id}
-        className="rounded-3xl bg-white p-4 text-slate-900"
-      >
-        {isFinished ? (
-          <>
-            <p className="text-center text-xs font-black uppercase tracking-wide text-slate-400">
-              Terminé
-            </p>
+        {isFinished
+          ? "Terminé"
+          : formatTime(game.game_date)}
+      </p>
 
-            <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-              <div className="text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-200 font-black">
+      <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2">
+        {/* EXTÉRIEUR */}
+        <button
+          type="button"
+          onClick={() => {
+            if (!isLocked && !isFinished) {
+              selectTeam(
+                game.id,
+                game.away_team_id
+              );
+            }
+          }}
+          disabled={isLocked || isFinished}
+          className={`relative rounded-xl px-3 py-2.5 transition ${
+            awaySelected && !isFinished
+              ? "bg-[#3F7D76] text-[#F8F6EF]"
+              : "bg-[#0B1F1D] text-[#F3F0E8]"
+          }`}
+        >
+          {awaySelected && !isFinished && (
+            <div className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#0B1F1D] text-[10px] font-black text-[#F8F6EF]">
+              ✓
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-2">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center">
+              {game.awayTeam?.logo_url ? (
+                <img
+                  src={game.awayTeam.logo_url}
+                  alt={game.awayTeam.name}
+                  className="h-9 w-9 object-contain"
+                />
+              ) : (
+                <span className="text-xs font-black">
                   {game.awayTeam?.abbreviation}
-                </div>
-
-                <p className="mt-2 text-sm font-bold">
-                  {game.awayTeam?.name}
-                </p>
-
-                <p className="mt-2 text-3xl font-black">
-                  {game.away_score}
-                </p>
-              </div>
-
-              <div className="text-xl font-black text-slate-400">
-                @
-              </div>
-
-              <div className="text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-200 font-black">
-                  {game.homeTeam?.abbreviation}
-                </div>
-
-                <p className="mt-2 text-sm font-bold">
-                  {game.homeTeam?.name}
-                </p>
-
-                <p className="mt-2 text-3xl font-black">
-                  {game.home_score}
-                </p>
-              </div>
+                </span>
+              )}
             </div>
 
-            {game.selectedTeamId ? (
-              <div
-                className={`mt-4 rounded-2xl p-4 text-center ${
-                  predictionCorrect
-                    ? "bg-green-100 text-green-800"
-                    : "bg-red-100 text-red-800"
-                }`}
-              >
-                <p className="font-black">
-                  {predictionCorrect
-                    ? "✓ Bon prono"
-                    : "✗ Mauvais prono"}
-                </p>
-
-                <p className="mt-1 text-sm">
-                  Ton prono :{" "}
-                  <span className="font-bold">
-                    {selectedTeam?.abbreviation}
-                  </span>
-
-                  {game.selectedLockedOdds !== null &&
-                    game.selectedLockedOdds !== undefined && (
-                      <span>
-                        {" "}
-                        · Cote {game.selectedLockedOdds}
-                      </span>
-                    )}
-                </p>
-
-                <p className="mt-2 text-lg font-black">
-                  {game.predictionPoints &&
-                  game.predictionPoints > 0
-                    ? `+${game.predictionPoints} pts`
-                    : "0 pt"}
-                </p>
-              </div>
-            ) : (
-              <div className="mt-4 rounded-2xl bg-slate-100 p-4 text-center text-sm font-bold text-slate-500">
-                Aucun prono effectué
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <p className="text-center text-sm font-bold text-slate-500">
-              {formatTime(game.game_date)}
-            </p>
-
-            <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isLocked) {
-                    selectTeam(
-                      game.id,
-                      game.away_team_id
-                    );
-                  }
-                }}
-                disabled={isLocked}
-                className={`rounded-2xl p-2 text-center transition ${
-                  awaySelected
-                    ? "bg-slate-900 text-white ring-4 ring-slate-300"
-                    : "bg-slate-50 text-slate-900"
-                }`}
-              >
-                <div
-                  className={`mx-auto flex h-12 w-12 items-center justify-center rounded-full font-black ${
-                    awaySelected
-                      ? "bg-white text-slate-900"
-                      : "bg-slate-200"
-                  }`}
-                >
-                  {game.awayTeam?.abbreviation}
-                </div>
-
-                <p className="mt-2 text-sm font-bold">
-                  {game.awayTeam?.name}
-                </p>
-
-                <p
-                  className={`mt-1 text-xs ${
-                    awaySelected
-                      ? "text-slate-300"
-                      : "text-slate-400"
-                  }`}
-                >
-                  Extérieur
-                </p>
-
-                <div
-                  className={`mt-2 rounded-xl py-2 ${
-                    awaySelected
-                      ? "bg-white text-slate-900"
-                      : "bg-slate-900 text-white"
-                  }`}
-                >
-                  <span className="text-xs opacity-60">
-                    Cote{" "}
-                  </span>
-
-                  <span className="font-black">
-                    {game.awayOdds}
-                  </span>
-                </div>
-
-                {awaySelected && (
-                  <p className="mt-2 text-xs font-black">
-                    ✓ TON PRONO
-                  </p>
-                )}
-              </button>
-
-              <div className="text-xl font-black text-slate-400">
-                @
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isLocked) {
-                    selectTeam(
-                      game.id,
-                      game.home_team_id
-                    );
-                  }
-                }}
-                disabled={isLocked}
-                className={`rounded-2xl p-2 text-center transition ${
-                  homeSelected
-                    ? "bg-slate-900 text-white ring-4 ring-slate-300"
-                    : "bg-slate-50 text-slate-900"
-                }`}
-              >
-                <div
-                  className={`mx-auto flex h-12 w-12 items-center justify-center rounded-full font-black ${
-                    homeSelected
-                      ? "bg-white text-slate-900"
-                      : "bg-slate-200"
-                  }`}
-                >
-                  {game.homeTeam?.abbreviation}
-                </div>
-
-                <p className="mt-2 text-sm font-bold">
-                  {game.homeTeam?.name}
-                </p>
-
-                <p
-                  className={`mt-1 text-xs ${
-                    homeSelected
-                      ? "text-slate-300"
-                      : "text-slate-400"
-                  }`}
-                >
-                  Domicile
-                </p>
-
-                <div
-                  className={`mt-2 rounded-xl py-2 ${
-                    homeSelected
-                      ? "bg-white text-slate-900"
-                      : "bg-slate-900 text-white"
-                  }`}
-                >
-                  <span className="text-xs opacity-60">
-                    Cote{" "}
-                  </span>
-
-                  <span className="font-black">
-                    {game.homeOdds}
-                  </span>
-                </div>
-
-                {homeSelected && (
-                  <p className="mt-2 text-xs font-black">
-                    ✓ TON PRONO
-                  </p>
-                )}
-              </button>
-            </div>
-
-            {game.selectedTeamId && !isLocked && (
-              <button
-                type="button"
-                onClick={() => savePrediction(game)}
-                disabled={savingGameId === game.id}
-                className="mt-4 w-full rounded-2xl bg-slate-900 py-3 font-bold text-white disabled:opacity-50"
-              >
-                {savingGameId === game.id
-                  ? "Enregistrement..."
-                  : "Enregistrer mon prono"}
-              </button>
-            )}
-
-            {isLocked && (
-              <div className="mt-4 rounded-xl bg-slate-100 p-3 text-center text-sm font-bold text-slate-600">
-                🔒 Pronostics verrouillés
-              </div>
-            )}
-
-            {savedGameId === game.id && (
-              <div className="mt-3 rounded-xl bg-green-100 p-3 text-center text-sm font-bold text-green-800">
-                Pronostic enregistré ✓
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    );
-  })}
+            <span className="text-base font-black">
+              {game.awayTeam?.abbreviation}
+            </span>
           </div>
+
+          <div className="mt-2 space-y-0.5 text-xs">
+            <p className="text-[#A9C2BD]">
+              Bilan{" "}
+              <span className="font-bold text-[#E2ECE9]">
+                {game.awayTeam?.wins ?? 0}-
+                {game.awayTeam?.losses ?? 0}
+              </span>
+            </p>
+
+            <p className="text-[#A9C2BD]">
+              Cote{" "}
+              <span className="text-base font-black text-[#F8F6EF]">
+                {game.awayOdds}
+              </span>
+            </p>
+          </div>
+        </button>
+
+        {/* @ */}
+        <div className="flex items-center px-1 text-sm font-bold text-[#A9C2BD]">
+          @
+        </div>
+
+        {/* DOMICILE */}
+        <button
+          type="button"
+          onClick={() => {
+            if (!isLocked && !isFinished) {
+              selectTeam(
+                game.id,
+                game.home_team_id
+              );
+            }
+          }}
+          disabled={isLocked || isFinished}
+          className={`relative rounded-xl px-3 py-2.5 transition ${
+            homeSelected && !isFinished
+              ? "bg-[#3F7D76] text-[#F8F6EF]"
+              : "bg-[#0B1F1D] text-[#F3F0E8]"
+          }`}
+        >
+          {homeSelected && !isFinished && (
+            <div className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#0B1F1D] text-[10px] font-black text-[#F8F6EF]">
+              ✓
+            </div>
+          )}
+
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-base font-black">
+              {game.homeTeam?.abbreviation}
+            </span>
+
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center">
+              {game.homeTeam?.logo_url ? (
+                <img
+                  src={game.homeTeam.logo_url}
+                  alt={game.homeTeam.name}
+                  className="h-9 w-9 object-contain"
+                />
+              ) : (
+                <span className="text-xs font-black">
+                  {game.homeTeam?.abbreviation}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-2 space-y-0.5 text-xs">
+            <p className="text-[#A9C2BD]">
+              Bilan{" "}
+              <span className="font-bold text-[#E2ECE9]">
+                {game.homeTeam?.wins ?? 0}-
+                {game.homeTeam?.losses ?? 0}
+              </span>
+            </p>
+
+            <p className="text-[#A9C2BD]">
+              Cote{" "}
+              <span className="text-base font-black text-[#F8F6EF]">
+                {game.homeOdds}
+              </span>
+            </p>
+          </div>
+        </button>
+      </div>
+
+      {/* MATCH TERMINÉ */}
+      {isFinished && game.selectedTeamId && (
+        <div className="mt-2 border-t border-slate-100 pt-2 text-center text-xs font-semibold">
+          <span
+            className={
+              predictionCorrect
+                ? "text-green-600"
+                : "text-red-500"
+            }
+          >
+            {predictionCorrect ? "✓" : "✕"}
+          </span>
+
+          <span className="ml-2 text-[#A9C2BD]">
+            {game.predictionPoints &&
+            game.predictionPoints > 0
+              ? `+${game.predictionPoints} pts`
+              : "0 pt"}
+          </span>
+        </div>
+      )}
+
+      
+
+      {/* VERROUILLÉ */}
+      {isLocked && !isFinished && (
+        <p className="mt-2 text-center text-xs font-medium text-slate-400">
+          🔒 Pronostics verrouillés
+        </p>
+      )}
+
+      
+    </div>
+  );
+})}
+          </div>
+          {games.length > 0 && (
+  <div className="sticky bottom-20 z-20 mt-4">
+    <button
+      type="button"
+      onClick={saveAllPredictions}
+      disabled={
+        savingAll ||
+        games.filter(
+          (game) =>
+            game.status !== "finished" &&
+            game.selectedTeamId
+        ).length === 0
+      }
+      className="w-full rounded-2xl bg-[#3F7D76] px-4 py-3.5 font-bold text-[#F8F6EF] shadow-lg disabled:opacity-40"
+    >
+      {savingAll
+        ? "Enregistrement..."
+        : `Enregistrer mes pronos · ${
+            games.filter(
+              (game) =>
+                game.status !== "finished" &&
+                game.selectedTeamId
+            ).length
+          }/${
+            games.filter(
+              (game) =>
+                game.status !== "finished"
+            ).length
+          }`}
+    </button>
+
+    {savedAll && (
+      <p className="mt-2 text-center text-xs font-semibold text-[#A9C2BD]">
+        Pronostics enregistrés ✓
+      </p>
+    )}
+  </div>
+)}
         </section>
 
-        <nav className="fixed bottom-0 left-1/2 w-full max-w-md -translate-x-1/2 border-t border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur">
+        <nav className="fixed bottom-0 left-1/2 w-full max-w-md -translate-x-1/2 border-t border-slate-800 bg-[#0B1F1D]/95 px-4 py-3 backdrop-blur">
           <div className="grid grid-cols-3 text-center text-xs font-semibold">
             <button
               type="button"
               onClick={() => router.push("/")}
-              className="py-3 text-slate-400"
+              className="py-3 text-[#A9C2BD]"
             >
               Accueil
             </button>
 
             <button
               type="button"
-              className="rounded-2xl bg-white py-3 text-slate-950"
+              className="rounded-2xl bg-[#265550] px-3 py-3 text-[#F3F0E8]"
+
             >
               Matchs
             </button>
@@ -730,7 +732,7 @@ export default function GamesPage() {
             <button
                 type="button"
                 onClick={() => router.push("/classement")}
-                className="py-3 text-slate-400"
+                className="py-3 text-[#A9C2BD]"
             >
                 Classement
                 </button>
