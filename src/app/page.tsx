@@ -23,6 +23,20 @@ type Game = {
   homeTeam?: Team;
   awayTeam?: Team;
   selectedTeamId: number | null;
+  selectedOdds: number | null;
+  lockTime: string | null;
+};
+
+type YesterdayPrediction = {
+  gameId: number;
+  gameDate: string;
+  awayTeam?: Team;
+  homeTeam?: Team;
+  awayScore: number | null;
+  homeScore: number | null;
+  selectedTeamId: number;
+  points: number;
+  isCorrect: boolean;
 };
 
 export default function Home() {
@@ -37,6 +51,11 @@ export default function Home() {
   const [rankingPosition, setRankingPosition] = useState<number | null>(null);
   const [playersCount, setPlayersCount] = useState(0);
   const [successPercentage, setSuccessPercentage] = useState(0);
+  const [yesterdayPredictions, setYesterdayPredictions] = useState<
+  YesterdayPrediction[]
+    >([]); 
+    const [yesterdayGamesCount, setYesterdayGamesCount] = useState(0);
+
 
   useEffect(() => {
     const savedPlayer = localStorage.getItem("nba_pronos_player");
@@ -232,28 +251,159 @@ export default function Home() {
         return;
       }
 
-      const completedGames: Game[] = gameData.map((game) => {
-        const prediction = predictions?.find(
-          (item) => item.game_id === game.id
-        );
+      const completedGames: Game[] = await Promise.all(
+        gameData.map(async (game) => {
+          const prediction = predictions?.find(
+            (item) => item.game_id === game.id
+          );
 
-        return {
-          ...game,
+          let selectedOdds: number | null = null;
 
-          homeTeam: teams.find(
-            (team) => team.id === game.home_team_id
-          ),
+          const { data: lockTimeData } = await supabase.rpc(
+            "get_prediction_lock_time",
+            {
+              p_game_id: game.id,
+            }
+          );
 
-          awayTeam: teams.find(
-            (team) => team.id === game.away_team_id
-          ),
+          const lockTime =
+            lockTimeData !== null ? String(lockTimeData) : null;
 
-          selectedTeamId: prediction?.team_id ?? null,
-        };
-      });
+          if (prediction) {
+            const { data: oddsData } = await supabase.rpc(
+              "get_prediction_current_odds",
+              {
+                p_game_id: game.id,
+                p_team_id: prediction.team_id,
+              }
+            );
+
+            if (oddsData !== null) {
+              selectedOdds = Number(oddsData);
+            }
+          }
+
+          return {
+            ...game,
+
+            homeTeam: teams.find(
+              (team) => team.id === game.home_team_id
+            ),
+
+            awayTeam: teams.find(
+              (team) => team.id === game.away_team_id
+            ),
+
+            selectedTeamId: prediction?.team_id ?? null,
+            selectedOdds,
+            lockTime,
+          };
+        })
+      );
 
       setGames(completedGames);
+      const yesterdayDay = new Date(`${date}T12:00:00`);
+      yesterdayDay.setDate(yesterdayDay.getDate() - 1);
+
+      const yesterdayYear = yesterdayDay.getFullYear();
+      const yesterdayMonth = String(
+        yesterdayDay.getMonth() + 1
+      ).padStart(2, "0");
+      const yesterdayDate = String(
+        yesterdayDay.getDate()
+      ).padStart(2, "0");
+
+      const yesterday = `${yesterdayYear}-${yesterdayMonth}-${yesterdayDate}`;
+
+      const yesterdayStart = new Date(
+        `${yesterday}T06:00:00+02:00`
+      );
+
+      const yesterdayEnd = new Date(
+        `${date}T05:59:59+02:00`
+      );
+
+      const { data: yesterdayGames } = await supabase
+        .from("games")
+        .select(
+          "id, game_date, home_team_id, away_team_id, home_score, away_score, status"
+        )
+        .eq("season_id", season.id)
+        .gte("game_date", yesterdayStart.toISOString())
+        .lte("game_date", yesterdayEnd.toISOString())
+        .order("game_date", { ascending: true });
+
+      if (yesterdayGames && yesterdayGames.length > 0) {
+        setYesterdayGamesCount(yesterdayGames?.length ?? 0);
+
+        const yesterdayGameIds = yesterdayGames.map(
+          (game) => game.id
+        );
+
+        const yesterdayTeamIds = [
+          ...new Set(
+            yesterdayGames.flatMap((game) => [
+              game.home_team_id,
+              game.away_team_id,
+            ])
+          ),
+        ];
+
+        const { data: yesterdayTeams } = await supabase
+          .from("teams")
+          .select("id, name, abbreviation")
+          .in("id", yesterdayTeamIds);
+
+        const { data: yesterdayPlayerPredictions } =
+          await supabase
+            .from("predictions")
+            .select("game_id, team_id, points")
+            .eq("user_id", currentPlayer.user_id)
+            .in("game_id", yesterdayGameIds);
+
+        const yesterdayResults: YesterdayPrediction[] =
+          yesterdayPlayerPredictions?.map((prediction) => {
+            const game = yesterdayGames.find(
+              (item) => item.id === prediction.game_id
+            )!;
+
+            const winnerTeamId =
+              game.status === "finished"
+                ? game.home_score > game.away_score
+                  ? game.home_team_id
+                  : game.away_team_id
+                : null;
+
+            return {
+              gameId: game.id,
+              gameDate: game.game_date,
+
+              awayTeam: yesterdayTeams?.find(
+                (team) => team.id === game.away_team_id
+              ),
+
+              homeTeam: yesterdayTeams?.find(
+                (team) => team.id === game.home_team_id
+              ),
+
+              awayScore: game.away_score,
+              homeScore: game.home_score,
+              selectedTeamId: prediction.team_id,
+              points: Number(prediction.points ?? 0),
+
+              isCorrect:
+                winnerTeamId !== null &&
+                prediction.team_id === winnerTeamId,
+            };
+          }) ?? [];
+
+        setYesterdayPredictions(yesterdayResults);
+      } else {
+        setYesterdayPredictions([]);
+      }
+
       setLoading(false);
+      
     }
 
     loadData();
@@ -282,6 +432,15 @@ export default function Home() {
   const completedPredictions = games.filter(
     (game) => game.selectedTeamId !== null
   ).length;
+
+  const yesterdayCorrect = yesterdayPredictions.filter(
+  (prediction) => prediction.isCorrect
+).length;
+
+const yesterdayPoints = yesterdayPredictions.reduce(
+  (total, prediction) => total + prediction.points,
+  0
+);
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
@@ -362,6 +521,9 @@ export default function Home() {
               <div className="mt-3 space-y-3">
                 {games.map((game) => {
                   const selectedTeam = getSelectedTeam(game);
+                  const isLocked =
+                    game.lockTime !== null &&
+                    new Date() >= new Date(game.lockTime);
 
                   return (
                     <div
@@ -385,12 +547,21 @@ export default function Home() {
 
                         {selectedTeam ? (
                           <div className="text-right">
-                            <p className="text-xs font-semibold text-green-700">
-                              ✓ PRONO FAIT
+                            <p
+                              className={`text-xs font-semibold ${
+                                isLocked ? "text-slate-500" : "text-green-700"
+                              }`}
+                              >
+                              {isLocked ? "🔒 PRONO VERROUILLÉ" : "✓ PRONO FAIT"}
                             </p>
 
                             <p className="mt-1 font-black">
                               {selectedTeam.abbreviation}
+                              {game.selectedOdds !== null && (
+                                <span className="ml-2 text-sm text-slate-500">
+                                  {game.selectedOdds} pts
+                                </span>
+                              )}
                             </p>
                           </div>
                         ) : (
@@ -426,6 +597,79 @@ export default function Home() {
               </button>
             </div>
           )}
+
+          {yesterdayPredictions.length > 0 ? (
+            <div className="rounded-3xl bg-slate-800 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-400">
+                    HIER SOIR
+                  </p>
+
+                  <p className="mt-1 text-lg font-black">
+                    {yesterdayCorrect}/{yesterdayPredictions.length} bons pronos
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-2xl font-black">
+                    +{yesterdayPoints}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    points
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {yesterdayPredictions.map((prediction) => {
+                  const selectedTeam =
+                    prediction.selectedTeamId ===
+                    prediction.awayTeam?.id
+                      ? prediction.awayTeam
+                      : prediction.homeTeam;
+
+                  return (
+                    <div
+                      key={prediction.gameId}
+                      className="flex items-center justify-between rounded-2xl bg-slate-700 p-3"
+                    >
+                      <div>
+                        <p className="text-xs text-slate-400">
+                          {prediction.awayTeam?.abbreviation}
+                          <span className="mx-2">@</span>
+                          {prediction.homeTeam?.abbreviation}
+                        </p>
+
+                        <p className="mt-1 font-bold">
+                          {prediction.isCorrect ? "✓" : "✗"}{" "}
+                          {selectedTeam?.abbreviation}
+                        </p>
+                      </div>
+
+                      <p className="font-black">
+                        {prediction.points > 0
+                          ? `+${prediction.points} pts`
+                          : "0 pt"}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+              <div className="rounded-3xl bg-slate-800 p-5">
+                <p className="text-sm font-semibold text-slate-400">
+                  HIER SOIR
+                </p>
+
+                <p className="mt-2 font-bold text-slate-300">
+                  {yesterdayGamesCount === 0
+                    ? "Pas de matchs hier soir "
+                    : "T'as pas fait tes pronos"}
+                </p>
+              </div>
+            )}
 
           <div className="grid grid-cols-3 gap-3">
             <div className="rounded-3xl bg-slate-800 p-4 text-center">
