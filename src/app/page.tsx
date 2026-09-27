@@ -143,26 +143,25 @@ export default function Home() {
             * 20 octobre 06:00 -> 21 octobre 05:59.
             */
             // Première journée de la saison
-      const firstGameDate = new Date("2026-10-20T06:00:00+02:00");
-
       const now = new Date();
+
+      const franceNow = new Date(
+        now.toLocaleString("en-US", {
+          timeZone: "Europe/Paris",
+        })
+      );
+
+      const seasonStart = new Date("2026-10-20T06:00:00");
 
       let nbaDay: Date;
 
       // Avant le début de la saison,
       // on affiche automatiquement la première journée.
-      if (now < firstGameDate) {
+      if (franceNow < seasonStart) {
         nbaDay = new Date("2026-10-20T12:00:00");
       } else {
-        // Une journée NBA change à 06:00 heure française.
-        const franceNow = new Date(
-          now.toLocaleString("en-US", {
-            timeZone: "Europe/Paris",
-          })
-        );
-
         // Entre minuit et 05:59,
-      // on appartient encore à la journée NBA précédente.
+        // on appartient encore à la journée NBA précédente.
         if (franceNow.getHours() < 6) {
           franceNow.setDate(franceNow.getDate() - 1);
         }
@@ -171,34 +170,38 @@ export default function Home() {
       }
 
       const year = nbaDay.getFullYear();
-      const month = String(nbaDay.getMonth() + 1).padStart(2, "0");
-      const day = String(nbaDay.getDate()).padStart(2, "0");
+      const month = String(
+        nbaDay.getMonth() + 1
+      ).padStart(2, "0");
+      const day = String(
+        nbaDay.getDate()
+      ).padStart(2, "0");
 
       const date = `${year}-${month}-${day}`;
 
-      const start = new Date(`${date}T06:00:00+02:00`);
+      const { data: dayBounds, error: dayBoundsError } =
+        await supabase.rpc("get_nba_day_bounds", {
+          p_date: date,
+        });
 
-      const nextDay = new Date(`${date}T12:00:00`);
-      nextDay.setDate(nextDay.getDate() + 1);
+      if (dayBoundsError || !dayBounds?.[0]) {
+        setError(
+          dayBoundsError?.message ||
+            "Impossible de calculer la journée NBA."
+        );
+        setLoading(false);
+        return;
+      }
 
-      const nextYear = nextDay.getFullYear();
-      const nextMonth = String(
-        nextDay.getMonth() + 1
-      ).padStart(2, "0");
-      const nextDate = String(
-        nextDay.getDate()
-      ).padStart(2, "0");
-
-      const end = new Date(
-        `${nextYear}-${nextMonth}-${nextDate}T05:59:59+02:00`
-      );
+      const start = dayBounds[0].start_time;
+      const end = dayBounds[0].end_time;
 
       const { data: gameData, error: gameError } = await supabase
         .from("games")
         .select("id, game_date, home_team_id, away_team_id")
         .eq("season_id", season.id)
-        .gte("game_date", start.toISOString())
-        .lte("game_date", end.toISOString())
+        .gte("game_date", start)
+        .lt("game_date", end)
         .order("game_date", { ascending: true });
 
       if (gameError) {
@@ -315,26 +318,48 @@ export default function Home() {
 
       const yesterday = `${yesterdayYear}-${yesterdayMonth}-${yesterdayDate}`;
 
-      const yesterdayStart = new Date(
-        `${yesterday}T06:00:00+02:00`
-      );
+      const { data: yesterdayBounds, error: yesterdayBoundsError } =
+        await supabase.rpc("get_nba_day_bounds", {
+          p_date: yesterday,
+        });
 
-      const yesterdayEnd = new Date(
-        `${date}T05:59:59+02:00`
-      );
+      if (yesterdayBoundsError || !yesterdayBounds?.[0]) {
+        setError(
+          yesterdayBoundsError?.message ||
+            "Impossible de calculer la journée NBA précédente."
+        );
+        setLoading(false);
+        return;
+      }
 
-      const { data: yesterdayGames } = await supabase
-        .from("games")
-        .select(
-          "id, game_date, home_team_id, away_team_id, home_score, away_score, status"
-        )
-        .eq("season_id", season.id)
-        .gte("game_date", yesterdayStart.toISOString())
-        .lte("game_date", yesterdayEnd.toISOString())
-        .order("game_date", { ascending: true });
+      const { data: yesterdayGames, error: yesterdayGamesError } =
+        await supabase
+          .from("games")
+          .select(
+            "id, game_date, home_team_id, away_team_id, home_score, away_score, status"
+          )
+          .eq("season_id", season.id)
+          .gte(
+            "game_date",
+            yesterdayBounds[0].start_time
+          )
+          .lt(
+            "game_date",
+            yesterdayBounds[0].end_time
+          )
+          .order("game_date", { ascending: true });
+
+      if (yesterdayGamesError) {
+        setError(yesterdayGamesError.message);
+        setLoading(false);
+        return;
+      }
+
+      setYesterdayGamesCount(
+        yesterdayGames?.length ?? 0
+      );
 
       if (yesterdayGames && yesterdayGames.length > 0) {
-        setYesterdayGamesCount(yesterdayGames?.length ?? 0);
 
         const yesterdayGameIds = yesterdayGames.map(
           (game) => game.id

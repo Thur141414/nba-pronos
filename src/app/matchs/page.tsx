@@ -127,18 +127,22 @@ export default function GamesPage() {
       setError("");
       setSavedGameId(null);
 
-      const start = new Date(`${date}T06:00:00+02:00`);
+      const { data: dayBounds, error: dayBoundsError } =
+        await supabase.rpc("get_nba_day_bounds", {
+          p_date: date,
+        });
 
-        const nextDay = new Date(`${date}T12:00:00`);
-        nextDay.setDate(nextDay.getDate() + 1);
-
-        const nextYear = nextDay.getFullYear();
-        const nextMonth = String(nextDay.getMonth() + 1).padStart(2, "0");
-        const nextDate = String(nextDay.getDate()).padStart(2, "0");
-
-        const end = new Date(
-        `${nextYear}-${nextMonth}-${nextDate}T05:59:59+02:00`
+      if (dayBoundsError || !dayBounds?.[0]) {
+        setError(
+          dayBoundsError?.message ||
+            "Impossible de calculer la journée NBA."
         );
+        setLoading(false);
+        return;
+      }
+
+      const start = dayBounds[0].start_time;
+      const end = dayBounds[0].end_time;
         
 
       const { data: gameData, error: gameError } = await supabase
@@ -147,8 +151,8 @@ export default function GamesPage() {
         "id, game_date, home_team_id, away_team_id, home_score, away_score, status"
         )
         .eq("season_id", currentSeasonId)
-        .gte("game_date", start.toISOString())
-        .lte("game_date", end.toISOString())
+        .gte("game_date", start)
+        .lt("game_date", end)
         .order("game_date", { ascending: true });
 
       if (gameError) {
