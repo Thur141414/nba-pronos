@@ -712,7 +712,7 @@ const [savedAll, setSavedAll] = useState(false);
         </section>
 
         <nav className="fixed bottom-0 left-1/2 w-full max-w-md -translate-x-1/2 border-t border-slate-800 bg-[#0B1F1D]/95 px-4 py-3 backdrop-blur">
-          <div className="grid grid-cols-3 text-center text-xs font-semibold">
+          <div className="grid grid-cols-4 text-center text-xs font-semibold">
             <button
               type="button"
               onClick={() => router.push("/")}
@@ -735,6 +735,13 @@ const [savedAll, setSavedAll] = useState(false);
                 className="py-3 text-[#A9C2BD]"
             >
                 Classement
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push("/stats")}
+                  className="py-3 text-[#A9C2BD]"
+            >
+                  Stats
                 </button>
           </div>
         </nav>

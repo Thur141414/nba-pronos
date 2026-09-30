@@ -922,7 +922,7 @@ const yesterdayPoints = yesterdayPredictions.reduce(
         </section>
 
         <nav className="fixed bottom-0 left-1/2 w-full max-w-md -translate-x-1/2 border-t border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur">
-          <div className="grid grid-cols-3 text-center text-xs font-semibold">
+          <div className="grid grid-cols-4 text-center text-xs font-semibold">
             <button
               type="button"
               className="rounded-2xl bg-white py-3 text-slate-950"
@@ -942,8 +942,16 @@ const yesterdayPoints = yesterdayPredictions.reduce(
               type="button"
               onClick={() => router.push("/classement")}
               className="py-3 text-slate-400"
-              >
+            >
               Classement
+            </button>
+
+            <button
+              type="button"
+              onClick={() => router.push("/stats")}
+              className="py-3 text-slate-400"
+            >
+              Stats
             </button>
           </div>
         </nav>
