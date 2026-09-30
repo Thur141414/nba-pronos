@@ -15,6 +15,11 @@ type Player = {
   username: string;
 };
 
+type PublicPick = {
+  team_id: number;
+  username: string;
+};
+
 type Game = {
   id: number;
   game_date: string;
@@ -25,7 +30,9 @@ type Game = {
   selectedTeamId: number | null;
   selectedOdds: number | null;
   lockTime: string | null;
+  publicPicks: PublicPick[];
 };
+
 
 type YesterdayPrediction = {
   gameId: number;
@@ -37,6 +44,7 @@ type YesterdayPrediction = {
   selectedTeamId: number;
   points: number;
   isCorrect: boolean;
+  publicPicks: PublicPick[]
 };
 
 export default function Home() {
@@ -55,6 +63,9 @@ export default function Home() {
   YesterdayPrediction[]
     >([]); 
     const [yesterdayGamesCount, setYesterdayGamesCount] = useState(0);
+
+    const [expandedPicks, setExpandedPicks] = useState<number | null>(null);
+
 
 
   useEffect(() => {
@@ -272,6 +283,25 @@ export default function Home() {
           const lockTime =
             lockTimeData !== null ? String(lockTimeData) : null;
 
+          let publicPicks: PublicPick[] = [];
+
+          const isLocked =
+            lockTime !== null &&
+            new Date() >= new Date(lockTime);
+
+          if (isLocked) {
+            const { data: publicPicksData } = await supabase.rpc(
+              "get_game_public_picks",
+              {
+                p_game_id: game.id,
+              }
+            );
+
+            if (publicPicksData) {
+              publicPicks = publicPicksData;
+            }
+          }
+
           if (prediction) {
             const { data: oddsData } = await supabase.rpc(
               "get_prediction_current_odds",
@@ -300,6 +330,7 @@ export default function Home() {
             selectedTeamId: prediction?.team_id ?? null,
             selectedOdds,
             lockTime,
+            publicPicks,
           };
         })
       );
@@ -387,7 +418,8 @@ export default function Home() {
             .in("game_id", yesterdayGameIds);
 
         const yesterdayResults: YesterdayPrediction[] =
-          yesterdayPlayerPredictions?.map((prediction) => {
+          await Promise.all(
+            yesterdayPlayerPredictions?.map(async (prediction) => {
             const game = yesterdayGames.find(
               (item) => item.id === prediction.game_id
             )!;
@@ -398,6 +430,16 @@ export default function Home() {
                   ? game.home_team_id
                   : game.away_team_id
                 : null;
+
+            const { data: publicPicksData } = await supabase.rpc(
+              "get_game_public_picks",
+              {
+                p_game_id: game.id,
+              }
+            );
+
+            const publicPicks: PublicPick[] =
+              publicPicksData ?? [];
 
             return {
               gameId: game.id,
@@ -419,8 +461,11 @@ export default function Home() {
               isCorrect:
                 winnerTeamId !== null &&
                 prediction.team_id === winnerTeamId,
+
+              publicPicks,
             };
-          }) ?? [];
+          }) ?? []
+        );
 
         setYesterdayPredictions(yesterdayResults);
       } else {
@@ -546,9 +591,20 @@ const yesterdayPoints = yesterdayPredictions.reduce(
               <div className="mt-3 space-y-3">
                 {games.map((game) => {
                   const selectedTeam = getSelectedTeam(game);
+
                   const isLocked =
                     game.lockTime !== null &&
                     new Date() >= new Date(game.lockTime);
+
+                  const awayPicks = game.publicPicks.filter(
+                    (pick) => pick.team_id === game.away_team_id
+                  );
+
+                  const homePicks = game.publicPicks.filter(
+                    (pick) => pick.team_id === game.home_team_id
+                  );
+
+                  const picksExpanded = expandedPicks === game.id;
 
                   return (
                     <div
@@ -574,14 +630,19 @@ const yesterdayPoints = yesterdayPredictions.reduce(
                           <div className="text-right">
                             <p
                               className={`text-xs font-semibold ${
-                                isLocked ? "text-slate-500" : "text-green-700"
+                                isLocked
+                                  ? "text-slate-500"
+                                  : "text-green-700"
                               }`}
-                              >
-                              {isLocked ? "🔒 PRONO VERROUILLÉ" : "✓ PRONO FAIT"}
+                            >
+                              {isLocked
+                                ? "🔒 PRONO VERROUILLÉ"
+                                : "✓ PRONO FAIT"}
                             </p>
 
                             <p className="mt-1 font-black">
                               {selectedTeam.abbreviation}
+
                               {game.selectedOdds !== null && (
                                 <span className="ml-2 text-sm text-slate-500">
                                   {game.selectedOdds} pts
@@ -597,6 +658,64 @@ const yesterdayPoints = yesterdayPredictions.reduce(
                           </div>
                         )}
                       </div>
+
+                      {isLocked && (
+                        <div className="mt-3 border-t border-slate-200 pt-3">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedPicks(
+                                picksExpanded ? null : game.id
+                              )
+                            }
+                            className="grid w-full grid-cols-[1fr_auto_1fr] items-center text-xs font-bold"
+                          >
+                            <span className="text-left">
+                              👥 {awayPicks.length}
+                            </span>
+
+                            <span className="px-3 text-[10px] font-semibold text-slate-400">
+                              PICKS
+                            </span>
+
+                            <span className="text-right">
+                              👥 {homePicks.length}
+                            </span>
+                          </button>
+
+                          {picksExpanded && (
+                            <div className="mt-2 grid grid-cols-2 gap-4 text-xs">
+                              <div>
+                                <p className="font-black">
+                                  {game.awayTeam?.abbreviation}
+                                </p>
+
+                                <p className="mt-1 leading-5 text-slate-500">
+                                  {awayPicks.length > 0
+                                    ? awayPicks
+                                        .map((pick) => pick.username)
+                                        .join(" · ")
+                                    : "Personne"}
+                                </p>
+                              </div>
+
+                              <div className="text-right">
+                                <p className="font-black">
+                                  {game.homeTeam?.abbreviation}
+                                </p>
+
+                                <p className="mt-1 leading-5 text-slate-500">
+                                  {homePicks.length > 0
+                                    ? homePicks
+                                        .map((pick) => pick.username)
+                                        .join(" · ")
+                                    : "Personne"}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -654,29 +773,102 @@ const yesterdayPoints = yesterdayPredictions.reduce(
                       ? prediction.awayTeam
                       : prediction.homeTeam;
 
+                  const awayPicks =
+                    prediction.publicPicks.filter(
+                      (pick) =>
+                        pick.team_id === prediction.awayTeam?.id
+                    );
+
+                  const homePicks =
+                    prediction.publicPicks.filter(
+                      (pick) =>
+                        pick.team_id === prediction.homeTeam?.id
+                    );
+
+                  const picksExpanded =
+                    expandedPicks === prediction.gameId;
+
                   return (
                     <div
                       key={prediction.gameId}
-                      className="flex items-center justify-between rounded-2xl bg-slate-700 p-3"
+                      className="rounded-2xl bg-slate-700 p-3"
                     >
-                      <div>
-                        <p className="text-xs text-slate-400">
-                          {prediction.awayTeam?.abbreviation}
-                          <span className="mx-2">@</span>
-                          {prediction.homeTeam?.abbreviation}
-                        </p>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs text-slate-400">
+                            {prediction.awayTeam?.abbreviation}
+                            <span className="mx-2">@</span>
+                            {prediction.homeTeam?.abbreviation}
+                          </p>
 
-                        <p className="mt-1 font-bold">
-                          {prediction.isCorrect ? "✓" : "✗"}{" "}
-                          {selectedTeam?.abbreviation}
+                          <p className="mt-1 font-bold">
+                            {prediction.isCorrect ? "✓" : "✗"}{" "}
+                            {selectedTeam?.abbreviation}
+                          </p>
+                        </div>
+
+                        <p className="font-black">
+                          {prediction.points > 0
+                            ? `+${prediction.points} pts`
+                            : "0 pt"}
                         </p>
                       </div>
 
-                      <p className="font-black">
-                        {prediction.points > 0
-                          ? `+${prediction.points} pts`
-                          : "0 pt"}
-                      </p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedPicks(
+                            picksExpanded
+                              ? null
+                              : prediction.gameId
+                          )
+                        }
+                        className="mt-3 grid w-full grid-cols-[1fr_auto_1fr] items-center border-t border-slate-600 pt-2 text-xs font-bold"
+                      >
+                        <span className="text-left">
+                          👥 {awayPicks.length}
+                        </span>
+
+                        <span className="px-3 text-[10px] font-semibold text-slate-400">
+                          PICKS
+                        </span>
+
+                        <span className="text-right">
+                          👥 {homePicks.length}
+                        </span>
+                      </button>
+
+                      {picksExpanded && (
+                        <div className="mt-2 grid grid-cols-2 gap-4 text-xs">
+                          <div>
+                            <p className="font-black">
+                              {prediction.awayTeam?.abbreviation}
+                            </p>
+
+                            <p className="mt-1 leading-5 text-slate-400">
+                              {awayPicks.length > 0
+                                ? awayPicks
+                                    .map((pick) => pick.username)
+                                    .join(" · ")
+                                : "Personne"}
+                            </p>
+                          </div>
+
+                          <div className="text-right">
+                            <p className="font-black">
+                              {prediction.homeTeam?.abbreviation}
+                            </p>
+
+                            <p className="mt-1 leading-5 text-slate-400">
+                              {homePicks.length > 0
+                                ? homePicks
+                                    .map((pick) => pick.username)
+                                    .join(" · ")
+                                : "Personne"}
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
