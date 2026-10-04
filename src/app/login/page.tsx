@@ -28,6 +28,15 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
+        if (
+      mode === "login" &&
+      username.trim().toLowerCase() === "admin"
+    ) {
+      sessionStorage.setItem("nba_pronos_admin_pin", pin);
+      router.push("/admin");
+      return;
+    }
+
     const functionName =
       mode === "login" ? "login_player" : "create_player";
 

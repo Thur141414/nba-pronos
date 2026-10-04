@@ -41,9 +41,9 @@ type YesterdayPrediction = {
   homeTeam?: Team;
   awayScore: number | null;
   homeScore: number | null;
-  selectedTeamId: number;
+  selectedTeamId: number | null;
   points: number;
-  isCorrect: boolean;
+  isCorrect: boolean | null;
   publicPicks: PublicPick[]
 };
 
@@ -221,10 +221,8 @@ export default function Home() {
         return;
       }
 
-      if (!gameData || gameData.length === 0) {
+      if (!gameData) {
         setGames([]);
-        setLoading(false);
-        return;
       }
 
       const teamIds = [
@@ -236,10 +234,13 @@ export default function Home() {
         ),
       ];
 
-      const { data: teams, error: teamsError } = await supabase
-        .from("teams")
-        .select("id, name, abbreviation")
-        .in("id", teamIds);
+            const { data: teams, error: teamsError } =
+        teamIds.length > 0
+          ? await supabase
+              .from("teams")
+              .select("id, name, abbreviation")
+              .in("id", teamIds)
+          : { data: [] as Team[], error: null };
 
       if (teamsError || !teams) {
         setError(
@@ -252,12 +253,14 @@ export default function Home() {
 
       const gameIds = gameData.map((game) => game.id);
 
-      const { data: predictions, error: predictionsError } =
-        await supabase
-          .from("predictions")
-          .select("game_id, team_id")
-          .eq("user_id", currentPlayer.user_id)
-          .in("game_id", gameIds);
+            const { data: predictions, error: predictionsError } =
+        gameIds.length > 0
+          ? await supabase
+              .from("predictions")
+              .select("game_id, team_id, locked_odds")
+              .eq("user_id", currentPlayer.user_id)
+              .in("game_id", gameIds)
+          : { data: [], error: null };
 
       if (predictionsError) {
         setError(predictionsError.message);
@@ -302,17 +305,21 @@ export default function Home() {
             }
           }
 
-          if (prediction) {
-            const { data: oddsData } = await supabase.rpc(
-              "get_prediction_current_odds",
-              {
-                p_game_id: game.id,
-                p_team_id: prediction.team_id,
-              }
-            );
+                    if (prediction) {
+            if (isLocked && prediction.locked_odds !== null) {
+              selectedOdds = Number(prediction.locked_odds);
+            } else {
+              const { data: oddsData } = await supabase.rpc(
+                "get_prediction_current_odds",
+                {
+                  p_game_id: game.id,
+                  p_team_id: prediction.team_id,
+                }
+              );
 
-            if (oddsData !== null) {
-              selectedOdds = Number(oddsData);
+              if (oddsData !== null) {
+                selectedOdds = Number(oddsData);
+              }
             }
           }
 
@@ -417,55 +424,57 @@ export default function Home() {
             .eq("user_id", currentPlayer.user_id)
             .in("game_id", yesterdayGameIds);
 
-        const yesterdayResults: YesterdayPrediction[] =
+                const yesterdayResults: YesterdayPrediction[] =
           await Promise.all(
-            yesterdayPlayerPredictions?.map(async (prediction) => {
-            const game = yesterdayGames.find(
-              (item) => item.id === prediction.game_id
-            )!;
+            yesterdayGames.map(async (game) => {
+              const prediction = yesterdayPlayerPredictions?.find(
+                (item) => item.game_id === game.id
+              );
 
-            const winnerTeamId =
-              game.status === "finished"
-                ? game.home_score > game.away_score
-                  ? game.home_team_id
-                  : game.away_team_id
-                : null;
+              const winnerTeamId =
+                game.status === "finished"
+                  ? game.home_score > game.away_score
+                    ? game.home_team_id
+                    : game.away_team_id
+                  : null;
 
-            const { data: publicPicksData } = await supabase.rpc(
-              "get_game_public_picks",
-              {
-                p_game_id: game.id,
-              }
-            );
+              const { data: publicPicksData } = await supabase.rpc(
+                "get_game_public_picks",
+                {
+                  p_game_id: game.id,
+                }
+              );
 
-            const publicPicks: PublicPick[] =
-              publicPicksData ?? [];
+              const publicPicks: PublicPick[] =
+                publicPicksData ?? [];
 
-            return {
-              gameId: game.id,
-              gameDate: game.game_date,
+              return {
+                gameId: game.id,
+                gameDate: game.game_date,
 
-              awayTeam: yesterdayTeams?.find(
-                (team) => team.id === game.away_team_id
-              ),
+                awayTeam: yesterdayTeams?.find(
+                  (team) => team.id === game.away_team_id
+                ),
 
-              homeTeam: yesterdayTeams?.find(
-                (team) => team.id === game.home_team_id
-              ),
+                homeTeam: yesterdayTeams?.find(
+                  (team) => team.id === game.home_team_id
+                ),
 
-              awayScore: game.away_score,
-              homeScore: game.home_score,
-              selectedTeamId: prediction.team_id,
-              points: Number(prediction.points ?? 0),
+                awayScore: game.away_score,
+                homeScore: game.home_score,
 
-              isCorrect:
-                winnerTeamId !== null &&
-                prediction.team_id === winnerTeamId,
+                selectedTeamId: prediction?.team_id ?? null,
+                points: Number(prediction?.points ?? 0),
 
-              publicPicks,
-            };
-          }) ?? []
-        );
+                isCorrect:
+                  prediction === undefined || winnerTeamId === null
+                    ? null
+                    : prediction.team_id === winnerTeamId,
+
+                publicPicks,
+              };
+            })
+          );
 
         setYesterdayPredictions(yesterdayResults);
       } else {
@@ -524,20 +533,32 @@ const yesterdayPoints = yesterdayPredictions.reduce(
             Saison {seasonName || "..."}
           </p>
 
-          <button
-            type="button"
-            onClick={() => {
-              localStorage.removeItem("nba_pronos_player");
-              router.replace("/login");
-            }}
-            className="mt-2 text-xs font-semibold text-slate-400 underline"
+                    <div className="mt-2 flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => router.push("/regles")}
+              className="text-xs font-semibold text-slate-400 underline"
             >
-            Se déconnecter
-          </button>
+              ➡️ Règles ⬅️
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem("nba_pronos_player");
+                sessionStorage.removeItem("nba_pronos_admin");
+                sessionStorage.removeItem("nba_pronos_admin_pin");
+                router.replace("/login");
+              }}
+              className="text-xs font-semibold text-slate-400 underline"
+            >
+              Se déconnecter 🔌
+            </button>
+          </div>
 
           <div className="mt-2 flex items-center justify-between">
             <h1 className="text-3xl font-black">
-              NBA PRONOS 🏀
+              PRONOS 2K26 🐐
             </h1>
 
             <div className="rounded-full bg-slate-800 px-4 py-2 text-sm font-bold">
@@ -768,10 +789,11 @@ const yesterdayPoints = yesterdayPredictions.reduce(
               <div className="mt-4 space-y-2">
                 {yesterdayPredictions.map((prediction) => {
                   const selectedTeam =
-                    prediction.selectedTeamId ===
-                    prediction.awayTeam?.id
-                      ? prediction.awayTeam
-                      : prediction.homeTeam;
+                    prediction.selectedTeamId === null
+                      ? null
+                      : prediction.selectedTeamId === prediction.awayTeam?.id
+                        ? prediction.awayTeam
+                        : prediction.homeTeam;
 
                   const awayPicks =
                     prediction.publicPicks.filter(
@@ -802,8 +824,20 @@ const yesterdayPoints = yesterdayPredictions.reduce(
                           </p>
 
                           <p className="mt-1 font-bold">
-                            {prediction.isCorrect ? "✓" : "✗"}{" "}
-                            {selectedTeam?.abbreviation}
+                            {prediction.selectedTeamId === null ? (
+                              <span className="text-slate-400">
+                                Pas de prono
+                              </span>
+                            ) : (
+                              <>
+                                {prediction.isCorrect === null
+                                  ? "⏳"
+                                  : prediction.isCorrect
+                                    ? "✓"
+                                    : "✗"}{" "}
+                                {selectedTeam?.abbreviation}
+                              </>
+                            )}
                           </p>
                         </div>
 

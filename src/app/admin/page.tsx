@@ -72,18 +72,18 @@ function getInitialDate() {
 
 const [date, setDate] = useState(getInitialDate);
 
-  async function unlockAdmin() {
-  setCheckingPin(true);
-  setAdminError("");
+    async function unlockAdmin(pinToCheck = adminPin) {
+    setCheckingPin(true);
+    setAdminError("");
 
-  const { data, error } = await supabase.functions.invoke(
-    "admin-logic",
-    {
-      body: {
-        pin: adminPin,
-      },
-    }
-  );
+    const { data, error } = await supabase.functions.invoke(
+      "admin-logic",
+      {
+        body: {
+          pin: pinToCheck,
+        },
+      }
+    );
 
   if (error) {
   setAdminError(`Erreur technique : ${error.message}`);
@@ -187,18 +187,28 @@ const end = new Date(
     setLoading(false);
   }
 
-  useEffect(() => {
-  const unlocked =
-    sessionStorage.getItem("nba_pronos_admin") ===
-    "unlocked";
+    useEffect(() => {
+    const unlocked =
+      sessionStorage.getItem("nba_pronos_admin") ===
+      "unlocked";
 
-  if (unlocked) {
-    setAdminUnlocked(true);
-    loadAdmin();
-  } else {
+    if (unlocked) {
+      setAdminUnlocked(true);
+      loadAdmin();
+      return;
+    }
+
+    const loginAdminPin =
+      sessionStorage.getItem("nba_pronos_admin_pin");
+
+        if (loginAdminPin) {
+      sessionStorage.removeItem("nba_pronos_admin_pin");
+      unlockAdmin(loginAdminPin);
+      return;
+    }
+
     setLoading(false);
-  }
-}, [date]);
+  }, [date]);
 
   async function deletePlayer(
     userId: string,
@@ -326,7 +336,7 @@ const end = new Date(
 
           <button
             type="button"
-            onClick={unlockAdmin}
+            onClick={() => unlockAdmin()}
             disabled={
               checkingPin || adminPin.length === 0
             }
