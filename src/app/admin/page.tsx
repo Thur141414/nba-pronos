@@ -12,6 +12,11 @@ type PlayerStatus = {
   all_done: boolean;
 };
 
+type PlayerPrediction = {
+  game_id: number;
+  team_id: number;
+};
+
 type Team = {
   name: string;
   abbreviation: string;
@@ -19,6 +24,8 @@ type Team = {
 
 type Game = {
   id: number;
+  home_team_id: number;
+  away_team_id: number;
   game_date: string;
   status: string;
   home_score: number | null;
@@ -32,12 +39,23 @@ export default function AdminPage() {
 
   const [players, setPlayers] = useState<PlayerStatus[]>([]);
   const [games, setGames] = useState<Game[]>([]);
+    const [playerPredictions, setPlayerPredictions] = useState<
+    PlayerPrediction[]
+  >([]);
+    const [editedPicks, setEditedPicks] = useState<
+    Record<number, number>
+  >({});
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [adminPin, setAdminPin] = useState("");
   const [adminError, setAdminError] = useState("");
-  const [checkingPin, setCheckingPin] = useState(false);
+    const [checkingPin, setCheckingPin] = useState(false);
+
+  const [selectedPlayerId, setSelectedPlayerId] = useState("");
+
+  const [correctionPin, setCorrectionPin] = useState("");
+  const [savingCorrection, setSavingCorrection] = useState(false);
 
   // Pour le moment on affiche la première journée.
   // On automatisera ensuite cette date comme sur l'accueil.
@@ -76,14 +94,37 @@ const [date, setDate] = useState(getInitialDate);
     setCheckingPin(true);
     setAdminError("");
 
-    const { data, error } = await supabase.functions.invoke(
-      "admin-logic",
-      {
-        body: {
-          pin: pinToCheck,
-        },
-      }
-    );
+        const controller = new AbortController();
+
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, 10000);
+
+    let data;
+    let error;
+
+    try {
+      const result = await supabase.functions.invoke(
+        "admin-logic",
+        {
+          body: {
+            pin: pinToCheck,
+          },
+          signal: controller.signal,
+        }
+      );
+
+      data = result.data;
+      error = result.error;
+    } catch {
+      setAdminError(
+        "Connexion à Supabase impossible. Réessaie."
+      );
+      setCheckingPin(false);
+      return;
+    } finally {
+      clearTimeout(timeout);
+    }
 
   if (error) {
   setAdminError(`Erreur technique : ${error.message}`);
@@ -158,8 +199,10 @@ const end = new Date(
     const { data: gameData, error: gameError } =
       await supabase
         .from("games")
-        .select(`
+                .select(`
           id,
+          home_team_id,
+          away_team_id,
           game_date,
           status,
           home_score,
@@ -209,6 +252,137 @@ const end = new Date(
 
     setLoading(false);
   }, [date]);
+
+  useEffect(() => {
+    async function loadPlayerPredictions() {
+            setPlayerPredictions([]);
+      setEditedPicks({});
+
+      if (!selectedPlayerId) return;
+
+      const { data, error } = await supabase
+        .from("predictions")
+        .select("game_id, team_id")
+        .eq("user_id", selectedPlayerId);
+
+      if (error) {
+        setMessage(
+          "Impossible de charger les pronos : " + error.message
+        );
+        return;
+      }
+
+            setPlayerPredictions(data || []);
+
+      const existingPicks: Record<number, number> = {};
+
+      for (const prediction of data || []) {
+        existingPicks[prediction.game_id] = prediction.team_id;
+      }
+
+      setEditedPicks(existingPicks);
+    }
+
+    loadPlayerPredictions();
+  }, [selectedPlayerId]);
+
+  function getChangedPicks() {
+    return games
+      .filter((game) => {
+        const newTeamId = editedPicks[game.id];
+
+        if (!newTeamId) return false;
+
+        const existingPrediction = playerPredictions.find(
+          (prediction) => prediction.game_id === game.id
+        );
+
+        return existingPrediction?.team_id !== newTeamId;
+      })
+      .map((game) => ({
+        gameId: game.id,
+        teamId: editedPicks[game.id],
+      }));
+  }
+
+      async function saveAdminPrediction() {
+    if (!selectedPlayerId || !correctionPin) {
+      setMessage("Sélectionne un joueur et saisis le PIN Admin.");
+      return;
+    }
+
+    const changes = getChangedPicks();
+
+    if (changes.length === 0) {
+      setMessage("Aucun pronostic à modifier.");
+      return;
+    }
+
+    setSavingCorrection(true);
+    setMessage("");
+
+    try {
+      for (const change of changes) {
+        const { data, error } = await supabase.functions.invoke(
+          "admin-logic",
+          {
+            body: {
+              pin: correctionPin,
+              action: "set_prediction",
+              userId: selectedPlayerId,
+              gameId: change.gameId,
+              teamId: change.teamId,
+            },
+          }
+        );
+
+        if (error || !data?.success) {
+          throw new Error(
+            data?.error ||
+              error?.message ||
+              `Erreur pour le match ${change.gameId}`
+          );
+        }
+      }
+
+      setPlayerPredictions((previous) => {
+        const updated = [...previous];
+
+        for (const change of changes) {
+          const index = updated.findIndex(
+            (prediction) => prediction.game_id === change.gameId
+          );
+
+          if (index >= 0) {
+            updated[index] = {
+              game_id: change.gameId,
+              team_id: change.teamId,
+            };
+          } else {
+            updated.push({
+              game_id: change.gameId,
+              team_id: change.teamId,
+            });
+          }
+        }
+
+        return updated;
+      });
+
+      setCorrectionPin("");
+      setMessage(
+        `✅ ${changes.length} pronostic(s) enregistré(s) avec succès !`
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? `❌ ${error.message} — certains pronos ont peut-être été enregistrés.`
+          : "❌ Erreur lors de l'enregistrement."
+      );
+    } finally {
+      setSavingCorrection(false);
+    }
+  }
 
   async function deletePlayer(
     userId: string,
@@ -470,6 +644,138 @@ const end = new Date(
                 })}
               </div>
             </section>
+
+                          <section className="mt-8">
+                <h2 className="mb-3 text-lg font-black">
+                  ✏️ Modifier un prono
+                </h2>
+
+                <div className="space-y-4 rounded-2xl bg-slate-800 p-4">
+                  <div>
+                    <label className="mb-2 block text-sm text-slate-300">
+                      Joueur
+                    </label>
+                    <select
+                      value={selectedPlayerId}
+                      onChange={(e) =>
+                        setSelectedPlayerId(e.target.value)
+                      }
+                      className="w-full rounded-xl bg-slate-700 p-3 text-white"
+                    >
+                      <option value="">Choisir un joueur</option>
+                      {players.map((player) => (
+                        <option
+                          key={player.user_id}
+                          value={player.user_id}
+                        >
+                          {player.username}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between">
+                      <p className="text-sm font-bold text-slate-300">
+                        Pronostics du joueur
+                      </p>
+
+                      <span className="rounded-lg bg-slate-600 px-3 py-1 text-xs font-bold">
+                        {
+                          games.filter((game) =>
+                            playerPredictions.some(
+                              (prediction) =>
+                                prediction.game_id === game.id
+                            )
+                          ).length
+                        }
+                        /{games.length} faits
+                      </span>
+                    </div>
+
+                    {games.map((game) => (
+                      <div
+                        key={game.id}
+                        className="rounded-xl bg-slate-700 p-3"
+                      >
+                        <p className="mb-3 text-center text-sm font-bold">
+                          {game.away.abbreviation} @{" "}
+                          {game.home.abbreviation}
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            {
+                              id: game.away_team_id,
+                              name: game.away.abbreviation,
+                            },
+                            {
+                              id: game.home_team_id,
+                              name: game.home.abbreviation,
+                            },
+                          ].map((team) => (
+                            <button
+                              key={team.id}
+                              type="button"
+                              onClick={() =>
+                                setEditedPicks((previous) => ({
+                                  ...previous,
+                                  [game.id]: team.id,
+                                }))
+                              }
+                              className={`rounded-lg px-3 py-3 font-bold ${
+                                editedPicks[game.id] === team.id
+                                  ? "bg-green-500 text-slate-950"
+                                  : "bg-slate-600 text-white"
+                              }`}
+                            >
+                              {team.name}
+                            </button>
+                          ))}
+                        </div>
+
+                        <p className="mt-2 text-center text-xs text-slate-300">
+                          {editedPicks[game.id]
+                            ? "✓ Équipe sélectionnée"
+                            : "Aucun prono"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm text-slate-300">
+                      PIN administrateur
+                    </label>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      value={correctionPin}
+                      onChange={(e) =>
+                        setCorrectionPin(e.target.value)
+                      }
+                      placeholder="Confirmer le PIN"
+                      className="w-full rounded-xl bg-slate-700 p-3 text-white"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={saveAdminPrediction}
+                    disabled={
+                      savingCorrection ||
+                      !selectedPlayerId ||
+                      !correctionPin ||
+                      getChangedPicks().length === 0
+                    }
+                    className="w-full rounded-xl bg-white py-3 font-black text-slate-950 disabled:opacity-40"
+                  >
+                    {savingCorrection
+                      ? "Enregistrement..."
+                      : "Enregistrer les modifications"}
+                  </button>
+                </div>
+              </section>
 
             <section className="mt-8">
               <h2 className="mb-3 text-lg font-black">
