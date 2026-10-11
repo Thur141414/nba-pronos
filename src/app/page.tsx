@@ -488,6 +488,12 @@ export default function Home() {
     loadData();
   }, [router]);
 
+  function getTeamLogo(abbreviation?: string) {
+    if (!abbreviation) return "";
+
+    return `/logos/${abbreviation.toUpperCase()}.png`;
+  }
+  
   function formatTime(gameDate: string) {
     return new Intl.DateTimeFormat("fr-FR", {
       hour: "2-digit",
@@ -638,13 +644,25 @@ const yesterdayPoints = yesterdayPredictions.reduce(
                             {formatTime(game.game_date)}
                           </p>
 
-                          <p className="mt-1 font-black">
-                            {game.awayTeam?.abbreviation}
-                            <span className="mx-2 text-slate-400">
-                              @
-                            </span>
-                            {game.homeTeam?.abbreviation}
-                          </p>
+                          <div className="mt-2 flex items-center gap-3">
+  {game.awayTeam && (
+    <img
+      src={getTeamLogo(game.awayTeam.abbreviation)}
+      alt={game.awayTeam.name}
+      className="h-10 w-10 object-contain"
+    />
+  )}
+
+  <span className="font-bold text-slate-400">@</span>
+
+  {game.homeTeam && (
+    <img
+      src={getTeamLogo(game.homeTeam.abbreviation)}
+      alt={game.homeTeam.name}
+      className="h-10 w-10 object-contain"
+    />
+  )}
+</div>
                         </div>
 
                         {selectedTeam ? (
@@ -817,11 +835,25 @@ const yesterdayPoints = yesterdayPredictions.reduce(
                     >
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-xs text-slate-400">
-                            {prediction.awayTeam?.abbreviation}
-                            <span className="mx-2">@</span>
-                            {prediction.homeTeam?.abbreviation}
-                          </p>
+                          <div className="flex items-center gap-2">
+  {prediction.awayTeam && (
+    <img
+      src={getTeamLogo(prediction.awayTeam.abbreviation)}
+      alt={prediction.awayTeam.name}
+      className="h-8 w-8 object-contain"
+    />
+  )}
+
+  <span className="text-xs text-slate-400">@</span>
+
+  {prediction.homeTeam && (
+    <img
+      src={getTeamLogo(prediction.homeTeam.abbreviation)}
+      alt={prediction.homeTeam.name}
+      className="h-8 w-8 object-contain"
+    />
+  )}
+</div>
 
                           <p className="mt-1 font-bold">
                             {prediction.selectedTeamId === null ? (
