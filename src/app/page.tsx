@@ -74,6 +74,8 @@ type YesterdayPrediction = {
 
   points: number;
 
+  maxPoints: number | null;
+
   isCorrect: boolean | null;
 
   publicPicks: PublicPick[]
@@ -618,7 +620,7 @@ export default function Home() {
 
           .select(
 
-            "id, game_date, home_team_id, away_team_id, home_score, away_score, status"
+            "id, game_date, home_team_id, away_team_id, home_score, away_score, status, locked_home_odds, locked_away_odds"
 
           )
 
@@ -742,6 +744,17 @@ export default function Home() {
 
                 publicPicksData ?? [];
 
+              // Les cotes figées sont prioritaires pour le maximum historique.
+              // Si elles manquent, on ne présente pas un maximum inexact.
+              const maxPoints =
+                game.locked_home_odds != null &&
+                game.locked_away_odds != null
+                  ? Math.max(
+                      Number(game.locked_home_odds),
+                      Number(game.locked_away_odds)
+                    )
+                  : null;
+
               return {
 
                 gameId: game.id,
@@ -767,6 +780,8 @@ export default function Home() {
                 selectedTeamId: prediction?.team_id ?? null,
 
                 points: Number(prediction?.points ?? 0),
+
+                maxPoints,
 
                 isCorrect:
 
@@ -856,6 +871,15 @@ const yesterdayPoints = yesterdayPredictions.reduce(
   0
 
 );
+
+const yesterdayMaxPoints = yesterdayPredictions.every(
+  (prediction) => prediction.maxPoints !== null
+)
+  ? yesterdayPredictions.reduce(
+      (total, prediction) => total + (prediction.maxPoints ?? 0),
+      0
+    )
+  : null;
 
   return (
 
@@ -1089,21 +1113,18 @@ const yesterdayPoints = yesterdayPredictions.reduce(
 
                             </p>
 
-                            <p className="mt-1 font-black">
-
-                              {selectedTeam.abbreviation}
-
+                            <div className="mt-1 flex items-center justify-end gap-2">
+                              <img
+                                src={getTeamLogo(selectedTeam.abbreviation)}
+                                alt={selectedTeam.name}
+                                className="h-9 w-9 object-contain"
+                              />
                               {game.selectedOdds !== null && (
-
-                                <span className="ml-2 text-sm text-[#A9C2BD]">
-
+                                <span className="text-sm font-bold text-[#A9C2BD]">
                                   {game.selectedOdds} pts
-
                                 </span>
-
                               )}
-
-                            </p>
+                            </div>
 
                           </div>
 
@@ -1302,9 +1323,9 @@ const yesterdayPoints = yesterdayPredictions.reduce(
                   </p>
 
                   <p className="text-xs text-[#A9C2BD]">
-
-                    points
-
+                    {yesterdayMaxPoints !== null
+                      ? `/ ${yesterdayMaxPoints} pts possibles`
+                      : "points"}
                   </p>
 
                 </div>
@@ -1366,9 +1387,47 @@ const yesterdayPoints = yesterdayPredictions.reduce(
                         <div>
 
                           <div className="flex items-center gap-2">
-  {prediction.awayTeam && <img src={getTeamLogo(prediction.awayTeam.abbreviation)} alt={prediction.awayTeam.name} className="h-8 w-8 object-contain" />}
+  {prediction.awayTeam && (
+    <div
+      className={`flex h-11 w-11 items-center justify-center rounded-full ${
+        prediction.selectedTeamId === prediction.awayTeam.id
+          ? prediction.isCorrect === true
+            ? "bg-green-500/20 ring-2 ring-green-400 shadow-[0_0_12px_rgba(74,222,128,0.6)]"
+            : prediction.isCorrect === false
+              ? "bg-red-500/20 ring-2 ring-red-400 shadow-[0_0_12px_rgba(248,113,113,0.6)]"
+              : ""
+          : ""
+      }`}
+    >
+      <img
+        src={getTeamLogo(prediction.awayTeam.abbreviation)}
+        alt={prediction.awayTeam.name}
+        className="h-8 w-8 object-contain"
+      />
+    </div>
+  )}
+
   <span className="text-xs text-[#A9C2BD]">@</span>
-  {prediction.homeTeam && <img src={getTeamLogo(prediction.homeTeam.abbreviation)} alt={prediction.homeTeam.name} className="h-8 w-8 object-contain" />}
+
+  {prediction.homeTeam && (
+    <div
+      className={`flex h-11 w-11 items-center justify-center rounded-full ${
+        prediction.selectedTeamId === prediction.homeTeam.id
+          ? prediction.isCorrect === true
+            ? "bg-green-500/20 ring-2 ring-green-400 shadow-[0_0_12px_rgba(74,222,128,0.6)]"
+            : prediction.isCorrect === false
+              ? "bg-red-500/20 ring-2 ring-red-400 shadow-[0_0_12px_rgba(248,113,113,0.6)]"
+              : ""
+          : ""
+      }`}
+    >
+      <img
+        src={getTeamLogo(prediction.homeTeam.abbreviation)}
+        alt={prediction.homeTeam.name}
+        className="h-8 w-8 object-contain"
+      />
+    </div>
+  )}
 </div>
 
                           <p className="mt-1 font-bold">

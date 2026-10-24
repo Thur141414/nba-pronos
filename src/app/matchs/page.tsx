@@ -396,6 +396,29 @@ const [savedAll, setSavedAll] = useState(false);
     }).format(new Date(gameDate));
   }
 
+  const finishedGames = games.filter(
+  (game) => game.status === "finished"
+);
+
+const dayCompleted =
+  games.length > 0 && finishedGames.length === games.length;
+
+const dayPoints = finishedGames.reduce(
+  (total, game) => total + (game.predictionPoints ?? 0),
+  0
+);
+
+const dayMaxPoints = finishedGames.reduce(
+  (total, game) =>
+    total + Math.max(game.homeOdds ?? 0, game.awayOdds ?? 0),
+  0
+);
+
+const dayPercentage =
+  dayMaxPoints > 0
+    ? (dayPoints / dayMaxPoints) * 100
+    : 0;
+
   return (
     <main className="min-h-screen bg-[#0B1F1D] text-white">
       <div className="mx-auto min-h-screen max-w-md bg-[#0B1F1D]">
@@ -491,6 +514,8 @@ const [savedAll, setSavedAll] = useState(false);
     game.selectedTeamId !== undefined &&
     game.selectedTeamId === winnerTeamId;
 
+    
+
   return (
     <div
       key={game.id}
@@ -518,12 +543,12 @@ const [savedAll, setSavedAll] = useState(false);
           }}
           disabled={isLocked || isFinished}
           className={`relative rounded-xl px-3 py-2.5 transition ${
-            awaySelected && !isFinished
+            awaySelected
               ? "bg-[#3F7D76] text-[#F8F6EF]"
               : "bg-[#0B1F1D] text-[#F3F0E8]"
           }`}
         >
-          {awaySelected && !isFinished && (
+          {awaySelected &&  (
             <div className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#0B1F1D] text-[10px] font-black text-[#F8F6EF]">
               ✓
             </div>
@@ -585,12 +610,12 @@ const [savedAll, setSavedAll] = useState(false);
           }}
           disabled={isLocked || isFinished}
           className={`relative rounded-xl px-3 py-2.5 transition ${
-            homeSelected && !isFinished
+            homeSelected
               ? "bg-[#3F7D76] text-[#F8F6EF]"
               : "bg-[#0B1F1D] text-[#F3F0E8]"
           }`}
         >
-          {homeSelected && !isFinished && (
+          {homeSelected &&  (
             <div className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#0B1F1D] text-[10px] font-black text-[#F8F6EF]">
               ✓
             </div>
@@ -671,6 +696,37 @@ const [savedAll, setSavedAll] = useState(false);
   );
 })}
           </div>
+
+{!loading && !error && dayCompleted && (
+  <div className="mt-5 rounded-2xl bg-[#265550] p-5 text-center">
+    <p className="text-xs font-semibold text-[#A9C2BD]">
+      BILAN DE LA JOURNÉE
+    </p>
+
+    <p className="mt-2 text-3xl font-black text-[#F8F6EF]">
+      {dayPoints}
+      <span className="ml-2 text-lg text-[#A9C2BD]">
+        / {dayMaxPoints} pts
+      </span>
+    </p>
+
+    <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#0B1F1D]">
+      <div
+        className="h-full rounded-full bg-[#A9C2BD]"
+        style={{
+          width: `${Math.min(100, dayPercentage)}%`,
+        }}
+      />
+    </div>
+
+    <p className="mt-2 text-xs text-[#A9C2BD]">
+      {dayPercentage.toFixed(1)} % des points possibles
+    </p>
+  </div>
+)}
+
+
+
           {games.length > 0 && (
   <div className="sticky bottom-20 z-20 mt-4">
     <button
@@ -686,6 +742,9 @@ const [savedAll, setSavedAll] = useState(false);
       }
       className="w-full rounded-2xl bg-[#3F7D76] px-4 py-3.5 font-bold text-[#F8F6EF] shadow-lg disabled:opacity-40"
     >
+
+
+      
       {savingAll
         ? "Enregistrement..."
         : `Enregistrer mes pronos · ${

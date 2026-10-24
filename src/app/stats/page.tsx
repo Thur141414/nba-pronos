@@ -36,6 +36,15 @@ type TeamStat = {
   team_losses_correct: number;
 };
 
+type TeamRank = {
+  team_id: number;
+  ranking_position: number;
+  player_count: number;
+  correct_predictions: number;
+  total_predictions: number;
+  success_percentage: number;
+};
+
 type PlayerStats = {
   total_predictions: number;
   correct_predictions: number;
@@ -70,6 +79,8 @@ export default function StatsPage() {
 
   const [player, setPlayer] = useState<Player | null>(null);
   const [stats, setStats] = useState<PlayerStats | null>(null);
+  const [teamRanks, setTeamRanks] = useState<TeamRank[]>([]);
+  const [teamRankError, setTeamRankError] = useState("");
 
   const [conference, setConference] = useState<
     "East" | "West"
@@ -118,6 +129,18 @@ export default function StatsPage() {
       }
 
       setStats(data as PlayerStats);
+      // Chargement indépendant : une erreur de classement n'empêche pas les stats de s'afficher.
+      const { data: ranks, error: rankError } = await supabase.rpc(
+        "get_my_team_success_ranks",
+        { p_user_id: currentPlayer.user_id }
+      );
+      if (rankError) {
+        setTeamRankError(rankError.message);
+        setTeamRanks([]);
+      } else {
+        setTeamRankError("");
+        setTeamRanks((ranks ?? []) as TeamRank[]);
+      }
       setLoading(false);
     }
 
@@ -137,6 +160,8 @@ export default function StatsPage() {
       return value === "west" || value === "western";
     });
   }, [stats, conference]);
+
+  const selectedTeamRank = teamRanks.find((rank) => Number(rank.team_id) === selectedTeamId) ?? null;
 
   const selectedTeam =
     stats?.teams.find(
@@ -406,6 +431,28 @@ export default function StatsPage() {
                           {selectedTeam.predictions} matchs pronostiqués
                         </p>
                       </div>
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-[#3F7D76] bg-[#265550] px-4 py-4">
+                      <p className="text-xs font-bold uppercase tracking-wide text-[#A9C2BD]">
+                        🏆 Mon classement sur les matchs de {selectedTeam.team}
+                      </p>
+                      {teamRankError ? (
+                        <p className="mt-2 text-xs text-red-200">Classement indisponible : {teamRankError}</p>
+                      ) : selectedTeamRank ? (
+                        <div className="mt-2 flex items-end justify-between gap-3">
+                          <div>
+                            <span className="text-3xl font-black">{selectedTeamRank.ranking_position}e</span>
+                            <span className="ml-2 text-sm text-[#E2ECE9]">/ {selectedTeamRank.player_count} joueurs</span>
+                          </div>
+                          <div className="text-right"><div className="text-lg font-black">{Number(selectedTeamRank.success_percentage)} %</div><div className="text-xs text-[#A9C2BD]">{selectedTeamRank.correct_predictions}/{selectedTeamRank.total_predictions} bons</div></div>
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-sm text-[#A9C2BD]">Classement indisponible pour cette équipe.</p>
+                      )}
+                      <p className="mt-2 text-xs text-[#A9C2BD]">
+                        Rang selon le % de bons pronostics sur les matchs de cette équipe, jouée pour ou contre. Tous les joueurs sont inclus (0 % sans prono).
+                      </p>
                     </div>
 
                     <div className="mt-4 grid grid-cols-3 gap-2">
