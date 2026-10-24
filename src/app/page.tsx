@@ -97,6 +97,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   const [error, setError] = useState("");
+  const [showChangelog, setShowChangelog] = useState(false);
 
   const [rankingPosition, setRankingPosition] = useState<number | null>(null);
 
@@ -962,6 +963,44 @@ const yesterdayMaxPoints = yesterdayPredictions.every(
         </header>
 
         <section className="space-y-5 px-5 pb-28">
+          {/* NOUVEAUTÉS — 24 OCTOBRE 2026 */}
+          <div className="overflow-hidden rounded-3xl border border-[#3F7D76] bg-[#265550]">
+            <button
+              type="button"
+              onClick={() => setShowChangelog((open) => !open)}
+              aria-expanded={showChangelog}
+              aria-controls="home-changelog"
+              className="flex w-full items-center justify-between gap-3 p-4 text-left"
+            >
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-[#A9C2BD]">24 octobre 2026</p>
+                <p className="mt-1 text-base font-black text-[#F8F6EF]">🆕 Dernière MAJ </p>
+                {!showChangelog && (
+                  <p className="mt-1 text-xs text-[#E2ECE9]">Classements, stats et récap de la nuit</p>
+                )}
+              </div>
+              <span aria-hidden="true" className="shrink-0 text-xl text-[#A9C2BD]">
+                {showChangelog ? "⌃" : "⌄"}
+              </span>
+            </button>
+            {showChangelog && (
+              <div id="home-changelog" className="space-y-3 border-t border-[#3F7D76] px-4 pb-4 pt-3 text-sm text-[#E2ECE9]">
+  <p><span className="font-bold text-[#F8F6EF]">Classements améliorés :</span> ajout des classements par équipe et par conférence Est / Ouest, avec les filtres Général, Semaine et Mois.</p>
+
+  <p><span className="font-bold text-[#F8F6EF]">Correction des classements :</span> calcul et tri corrigés selon les points réellement gagnés. Le total Est + Ouest correspond au classement général.</p>
+
+  <p><span className="font-bold text-[#F8F6EF]">Mes Stats :</span> ajout du rang et du pourcentage de réussite pour chacune des 30 équipes NBA, en comptant les pronostics pour et contre.</p>
+
+  <p><span className="font-bold text-[#F8F6EF]">Accueil amélioré :</span> remplacement des abréviations à trois lettres par les logos des équipes pour afficher les pronostics du soir.</p>
+
+  <p><span className="font-bold text-[#F8F6EF]">Correction des matchs de la veille :</span> l'équipe pronostiquée est désormais clairement mise en avant avec un contour vert en cas de victoire et rouge en cas de défaite.</p>
+
+  <p><span className="font-bold text-[#F8F6EF]">Récap de la nuit :</span> ajout d'un tableau comparatif des pronostics de tous les joueurs, avec les équipes choisies, les cotes, les résultats et les points gagnés.</p>
+
+  <p><span className="font-bold text-[#F8F6EF]">Partage du récap :</span> possibilité de générer une image du récapitulatif pour la partager sur Messenger.</p>
+</div>
+            )}
+          </div>
 
           {loading && (
 
