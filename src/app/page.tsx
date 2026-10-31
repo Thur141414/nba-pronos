@@ -748,13 +748,11 @@ export default function Home() {
               // Les cotes figées sont prioritaires pour le maximum historique.
               // Si elles manquent, on ne présente pas un maximum inexact.
               const maxPoints =
-                game.locked_home_odds != null &&
-                game.locked_away_odds != null
-                  ? Math.max(
-                      Number(game.locked_home_odds),
-                      Number(game.locked_away_odds)
-                    )
-                  : null;
+  winnerTeamId === game.home_team_id && game.locked_home_odds != null
+    ? Number(game.locked_home_odds)
+    : winnerTeamId === game.away_team_id && game.locked_away_odds != null
+      ? Number(game.locked_away_odds)
+      : null;
 
               return {
 
