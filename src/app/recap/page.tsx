@@ -19,6 +19,24 @@ type RecapGame = {
   locked_away_odds?: number | null;
 };
 type PlayerTotal = { name: string; points: number; correct: number; played: number };
+type GeneralRank = {
+  user_id: string;
+  username: string;
+  general_points: number;
+  general_rank: number;
+  rank_movement: number;
+};
+
+function rankLabel(rank: number) { return `${rank}${rank === 1 ? "er" : "e"}`; }
+function rankColor(rank: number) {
+  return rank === 1 ? "#F2C14E" : rank === 2 ? "#9DAEB8" : rank === 3 ? "#CD9565" : "#F8F6EF";
+}
+function movementLabel(movement: number) {
+  return movement > 0 ? `↑ ${movement}` : movement < 0 ? `↓ ${Math.abs(movement)}` : "=";
+}
+function movementColor(movement: number) {
+  return movement > 0 ? "#4ADE80" : movement < 0 ? "#F87171" : "#A9C2BD";
+}
 
 function nbaDate(offset = 0) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -50,6 +68,7 @@ export default function RecapPage() {
   const router = useRouter();
   const [date, setDate] = useState(() => nbaDate(-1));
   const [games, setGames] = useState<RecapGame[]>([]);
+  const [generalRanks, setGeneralRanks] = useState<GeneralRank[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sharing, setSharing] = useState(false);
@@ -63,8 +82,21 @@ export default function RecapPage() {
     async function load() {
       setLoading(true);
       setError("");
-      const { data, error: rpcError } = await supabase.rpc("get_night_recap", { p_date: date });
+      // Les deux requêtes portent sur la même journée NBA.
+      const [recapResponse, rankingResponse] = await Promise.all([
+        supabase.rpc("get_night_recap", { p_date: date }),
+        supabase.rpc("get_recap_general_ranking", { p_date: date }),
+      ]);
       if (!active) return;
+      const { data, error: rpcError } = recapResponse;
+      if (rankingResponse.error) {
+        setError(`Classement général indisponible : ${rankingResponse.error.message}`);
+        setGames([]);
+        setGeneralRanks([]);
+        setLoading(false);
+        return;
+      }
+      setGeneralRanks((rankingResponse.data ?? []) as GeneralRank[]);
       if (rpcError) {
         setError(rpcError.message);
         setGames([]);
@@ -111,8 +143,21 @@ export default function RecapPage() {
       if (pick.team_id === winner(game)) current.correct++;
       map.set(pick.username, current);
     }));
-    return [...map.values()].sort((a, b) => b.points - a.points || b.correct - a.correct || a.name.localeCompare(b.name));
-  }, [games]);
+    const ranks = new Map(generalRanks.map((r) => [r.username, Number(r.general_rank)]));
+    return [...map.values()].sort((a, b) =>
+      b.points - a.points ||
+      (ranks.get(a.name) ?? Infinity) - (ranks.get(b.name) ?? Infinity) ||
+      a.name.localeCompare(b.name)
+    );
+  }, [games, generalRanks]);
+
+  const generalByName = useMemo(
+    () => new Map(generalRanks.map((r) => [r.username, r])),
+    [generalRanks]
+  );
+
+  const isPerfectNight = (person: PlayerTotal) =>
+    games.length > 0 && person.played === games.length && person.correct === games.length;
 
   const picksByGame = useMemo(() => {
     return games.map((game) => new Map(game.picks.map((pick) => [pick.username, pick])));
@@ -123,9 +168,9 @@ export default function RecapPage() {
     setSharing(true);
     setError("");
     try {
-      const nameW = 210, gameW = 96, pointsW = 115, margin = 28;
+      const nameW = 210, gameW = 96, pointsW = 115, rankW = 132, margin = 28;
       const headH = 112, rowH = 64, top = 154, bottom = 52;
-      const width = margin * 2 + nameW + games.length * gameW + pointsW;
+      const width = margin * 2 + nameW + games.length * gameW + pointsW + rankW;
       const height = top + headH + Math.max(1, totals.length) * rowH + bottom;
       const canvas = document.createElement("canvas");
       canvas.width = width;
@@ -180,9 +225,14 @@ export default function RecapPage() {
       const pointsX = x0 + nameW + games.length * gameW;
       fill(pointsX, y0, pointsW, headH, "#3F7D76");
       text("POINTS", pointsX + pointsW / 2, y0 + 62, 17, "#F8F6EF", "center");
+      const rankX = pointsX + pointsW;
+      fill(rankX, y0, rankW, headH, "#265550");
+      text("GÉNÉRAL", rankX + rankW / 2, y0 + 49, 15, "#F8F6EF", "center");
+      text("RANG / ÉVOL.", rankX + rankW / 2, y0 + 71, 12, "#A9C2BD", "center");
       totals.forEach((p, row) => {
         const y = y0 + headH + row * rowH;
-        const bg = row % 2 === 0 ? "#173B37" : "#214944";
+        const perfect = games.length > 0 && p.played === games.length && p.correct === games.length;
+        const bg = perfect ? "#315B42" : row % 2 === 0 ? "#173B37" : "#214944";
         fill(x0, y, nameW, rowH - 1, bg);
         text(`${row + 1}.`, x0 + 12, y + 36, 15, "#A9C2BD");
         const shortName = p.name.length > 17 ? `${p.name.slice(0, 16)}…` : p.name;
@@ -194,9 +244,22 @@ export default function RecapPage() {
           if (!pick) text("✕", x + gameW / 2, y + 40, 27, "#FB7185", "center");
           else drawLogo(pickTeam(game, pick), x + (gameW - 43) / 2, y + 10, 43, pick.team_id !== winner(game));
         });
-        fill(pointsX, y, pointsW, rowH - 1, "#265550");
+        fill(pointsX, y, pointsW, rowH - 1, perfect ? "#386C4C" : "#265550");
         text(`+${p.points}`, pointsX + pointsW / 2, y + 30, 19, "#F8F6EF", "center");
         text(`${p.correct}/${p.played}`, pointsX + pointsW / 2, y + 49, 12, "#A9C2BD", "center", false);
+        const general = generalByName.get(p.name);
+        fill(rankX, y, rankW, rowH - 1, bg);
+        if (perfect) {
+          fill(x0, y, 5, rowH - 1, "#C8E6A0");
+        }
+        if (general) {
+          const rank = Number(general.general_rank);
+          const movement = Number(general.rank_movement);
+          text(rankLabel(rank), rankX + rankW / 2, y + 28, 19, rankColor(rank), "center");
+          text(movementLabel(movement), rankX + rankW / 2, y + 49, 15, movementColor(movement), "center");
+        } else {
+          text("—", rankX + rankW / 2, y + 37, 19, "#A9C2BD", "center");
+        }
       });
       text("Logo clair = gagné  •  Logo sombre = perdu  •  ✕ = pas de prono", margin, height - 19, 14, "#A9C2BD", "left", false);
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
@@ -263,13 +326,18 @@ export default function RecapPage() {
                           )}
                         </th>
                       ))}
-                      <th scope="col" className="w-[88px] min-w-[88px] border-b border-[#3F7D76] bg-[#3F7D76] px-2 font-black">POINTS</th>
+                      <th scope="col" className="w-[88px] min-w-[88px] border-b border-r border-[#3F7D76] bg-[#3F7D76] px-2 font-black">POINTS</th>
+                      <th scope="col" className="w-[100px] min-w-[100px] border-b border-[#3F7D76] bg-[#265550] px-2 font-black">
+                        GÉNÉRAL
+                        <div className="mt-1 text-[10px] font-medium text-[#A9C2BD]">Rang / évol.</div>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {totals.map((person, row) => (
                       <tr key={person.name}>
-                        <th scope="row" title={person.name} className={`sticky left-0 z-20 max-w-[120px] border-b border-r border-[#3F7D76] px-2 py-3 text-left font-bold shadow-[3px_0_8px_rgba(0,0,0,0.25)] ${row % 2 === 0 ? "bg-[#173B37]" : "bg-[#214944]"}`}>
+
+                        <th scope="row" title={person.name} className={`sticky left-0 z-20 max-w-[120px] border-b border-r border-[#3F7D76] px-2 py-3 text-left font-bold shadow-[3px_0_8px_rgba(0,0,0,0.25)] ${isPerfectNight(person) ? "bg-[#315B42]" : row % 2 === 0 ? "bg-[#173B37]" : "bg-[#214944]"}`}>
                           <span className="mr-1 text-[#A9C2BD]">{row + 1}.</span>
                           <span className="break-words">{person.name}</span>
                         </th>
@@ -277,7 +345,7 @@ export default function RecapPage() {
                           const pick = picksByGame[i].get(person.name);
                           const correct = pick?.team_id === winner(game);
                           return (
-                            <td key={game.id} className={`h-[64px] border-b border-r border-[#3F7D76] p-1 ${row % 2 === 0 ? "bg-[#173B37]" : "bg-[#214944]"}`}>
+                            <td key={game.id} className={`h-[64px] border-b border-r border-[#3F7D76] p-1 ${isPerfectNight(person) ? "bg-[#315B42]" : row % 2 === 0 ? "bg-[#173B37]" : "bg-[#214944]"}`}>
                               {!pick ? (
                                 <span title="Aucun prono" className="text-2xl font-black text-red-400">✕</span>
                               ) : (
@@ -288,9 +356,27 @@ export default function RecapPage() {
                             </td>
                           );
                         })}
-                        <td className="border-b border-[#3F7D76] bg-[#265550] px-2 py-2">
+                        <td className={`border-b border-r border-[#3F7D76] px-2 py-2 ${isPerfectNight(person) ? "bg-[#386C4C]" : "bg-[#265550]"}`}>
                           <div className="text-base font-black">+{person.points}</div>
                           <div className="text-[10px] text-[#A9C2BD]">{person.correct}/{person.played}</div>
+                        </td>
+                        <td className={`border-b border-[#3F7D76] px-2 py-2 ${isPerfectNight(person) ? "bg-[#315B42]" : "bg-[#214944]"}`}>
+                          {(() => {
+                            const general = generalByName.get(person.name);
+                            if (!general) return <span className="text-[#A9C2BD]">—</span>;
+                            const rank = Number(general.general_rank);
+                            const movement = Number(general.rank_movement);
+                            return (
+                              <div className="flex flex-col items-center gap-1">
+                                <span className="text-base font-black" style={{ color: rankColor(rank) }}>
+                                  {rankLabel(rank)}
+                                </span>
+                                <span className="text-xs font-bold" style={{ color: movementColor(movement) }}>
+                                  {movementLabel(movement)}
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </td>
                       </tr>
                     ))}
