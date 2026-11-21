@@ -6,6 +6,12 @@ const nextConfig: NextConfig = {
     "playwright-core",
     "@sparticuz/chromium",
   ],
+
+  outputFileTracingIncludes: {
+    "/api/generate-recap": [
+      "./node_modules/playwright-core/browsers.json",
+    ],
+  },
 };
 
 export default nextConfig;
