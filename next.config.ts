@@ -8,10 +8,11 @@ const nextConfig: NextConfig = {
   ],
 
   outputFileTracingIncludes: {
-    "/api/generate-recap": [
-      "./node_modules/playwright-core/browsers.json",
-    ],
-  },
+  "/api/generate-recap": [
+    "./node_modules/playwright-core/browsers.json",
+    "./node_modules/@sparticuz/chromium/bin/**/*"
+  ]
+},
 };
 
 export default nextConfig;
